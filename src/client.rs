@@ -301,11 +301,29 @@ impl Client {
         params: Vec<(&str, &str)>,
     ) -> Result<QueryPageResponse<T>, Error> {
         let res = self.get(query_url, params).await?;
+        let status = res.status();
+        let body: String = res.text().await?;
 
-        if res.status().is_success() {
-            Ok(res.json().await?)
+        if status.is_success() {
+            let parsed_body = serde_json::from_str(&body).map_err(|e| {
+                Error::DeserializeError(format!(
+                    "Error deserializing successful response body: {:?}\nBody:{}",
+                    e, body
+                ))
+            })?;
+
+            Ok(parsed_body)
         } else {
-            Err(Error::ErrorResponses(res.json().await?))
+            let parsed_body = match serde_json::from_str(&body) {
+                Ok(error_body) => error_body,
+                Err(e) => vec![ErrorResponse {
+                    message: format!("Error deserializing error body: {:?}\nBody:{}", e, body),
+                    error_code: "BODY_DECODE_ERROR".to_string(),
+                    fields: None,
+                }],
+            };
+
+            Err(Error::ErrorResponses(parsed_body))
         }
     }
 
